@@ -95,8 +95,10 @@ impl Sink for Vec<u8> {
 }
 
 /// Discards everything written — used by [`DmsArchive::verify`].
+#[cfg(feature = "std")]
 struct NullSink;
 
+#[cfg(feature = "std")]
 impl Sink for NullSink {
     fn write_block(&mut self, _data: &[u8]) -> Result<()> {
         Ok(())

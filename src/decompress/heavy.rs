@@ -7,7 +7,7 @@
 //! only when the track's rebuild flag is set; otherwise the previous track's
 //! tables are reused.
 
-use super::{Corrupt, Decompressor, HEAVY_NC, HEAVY_NPT};
+use super::{copy_match, push_window, Corrupt, Decompressor, HEAVY_NC, HEAVY_NPT};
 use crate::bitreader::BitReader;
 
 /// Character codes below this are literals; the rest index internal tree nodes.
@@ -39,29 +39,24 @@ impl Decompressor {
             let code = self.decode_c(&mut bits);
             if code < 256 {
                 let byte = code as u8;
-                self.push_window(byte, mask);
+                push_window(&mut self.window[..], &mut self.heavy_pos, mask, byte);
                 out[pos] = byte;
                 pos += 1;
             } else {
                 let length = code - OFFSET;
                 let distance = self.decode_p(&mut bits, np);
-                let mut src = self.heavy_pos.wrapping_sub(distance).wrapping_sub(1);
-                for _ in 0..length {
-                    let byte = self.window[(src & mask) as usize];
-                    self.push_window(byte, mask);
-                    src = src.wrapping_add(1);
-                    *out.get_mut(pos).ok_or(Corrupt)? = byte;
-                    pos += 1;
-                }
+                copy_match(
+                    &mut self.window[..],
+                    &mut self.heavy_pos,
+                    mask,
+                    distance,
+                    length,
+                    out,
+                    &mut pos,
+                )?;
             }
         }
         Ok(())
-    }
-
-    /// Appends `byte` to the sliding window and advances the write position.
-    fn push_window(&mut self, byte: u8, mask: u16) {
-        self.window[(self.heavy_pos & mask) as usize] = byte;
-        self.heavy_pos = self.heavy_pos.wrapping_add(1);
     }
 
     /// Decodes one character/length code (a 12-bit table lookup, falling back to

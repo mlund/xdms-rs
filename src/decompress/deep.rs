@@ -5,7 +5,7 @@
 //! [`D_CODE`]/[`D_LEN`] tables.
 
 use super::tables::{D_CODE, D_LEN};
-use super::{Corrupt, Decompressor, DEEP_N_CHAR as N_CHAR, DEEP_T as T};
+use super::{copy_match, push_window, Corrupt, Decompressor, DEEP_N_CHAR as N_CHAR, DEEP_T as T};
 use crate::bitreader::BitReader;
 
 /// Root node of the Huffman tree.
@@ -29,29 +29,25 @@ impl Decompressor {
             let code = self.decode_char(&mut bits);
             if code < 256 {
                 let byte = code as u8;
-                self.push_deep(byte);
+                push_window(&mut self.window[..], &mut self.deep_pos, MASK, byte);
                 out[pos] = byte;
                 pos += 1;
             } else {
                 let length = code - LENGTH_BIAS;
                 let distance = decode_deep_distance(&mut bits);
-                let mut src = self.deep_pos.wrapping_sub(distance).wrapping_sub(1);
-                for _ in 0..length {
-                    let byte = self.window[(src & MASK) as usize];
-                    self.push_deep(byte);
-                    src = src.wrapping_add(1);
-                    *out.get_mut(pos).ok_or(Corrupt)? = byte;
-                    pos += 1;
-                }
+                copy_match(
+                    &mut self.window[..],
+                    &mut self.deep_pos,
+                    MASK,
+                    distance,
+                    length,
+                    out,
+                    &mut pos,
+                )?;
             }
         }
         self.deep_pos = self.deep_pos.wrapping_add(60) & MASK;
         Ok(())
-    }
-
-    fn push_deep(&mut self, byte: u8) {
-        self.window[(self.deep_pos & MASK) as usize] = byte;
-        self.deep_pos = self.deep_pos.wrapping_add(1);
     }
 
     /// Builds the initial balanced Huffman tree (the C `Init_DEEP_Tabs`).

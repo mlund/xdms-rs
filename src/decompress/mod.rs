@@ -173,3 +173,36 @@ impl Default for Decompressor {
         Self::new()
     }
 }
+
+/// Writes `byte` to the sliding `window` at the current position and advances it.
+///
+/// Shared by every LZ-family mode; `pos` and `mask` differ per mode (each keeps
+/// its own position field and window size), so they are passed in.
+fn push_window(window: &mut [u8], pos: &mut u16, mask: u16, byte: u8) {
+    window[(*pos & mask) as usize] = byte;
+    *pos = pos.wrapping_add(1);
+}
+
+/// Copies a back-reference of `length` bytes starting `distance + 1` behind the
+/// current position: each byte is read from the window, pushed back onto it, and
+/// emitted to `out` at `*out_pos` (which advances). Shared by QUICK/MEDIUM/DEEP/
+/// HEAVY, whose match decoding differs only in how `distance`/`length` arrive.
+fn copy_match(
+    window: &mut [u8],
+    pos: &mut u16,
+    mask: u16,
+    distance: u16,
+    length: u16,
+    out: &mut [u8],
+    out_pos: &mut usize,
+) -> Result<(), Corrupt> {
+    let mut src = pos.wrapping_sub(distance).wrapping_sub(1);
+    for _ in 0..length {
+        let byte = window[(src & mask) as usize];
+        push_window(window, pos, mask, byte);
+        src = src.wrapping_add(1);
+        *out.get_mut(*out_pos).ok_or(Corrupt)? = byte;
+        *out_pos += 1;
+    }
+    Ok(())
+}

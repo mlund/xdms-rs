@@ -3,7 +3,7 @@
 //! two-level [`D_CODE`]/[`D_LEN`] tables into a 16 KB window.
 
 use super::tables::{D_CODE, D_LEN};
-use super::{Corrupt, Decompressor};
+use super::{copy_match, push_window, Corrupt, Decompressor};
 use crate::bitreader::BitReader;
 
 /// MEDIUM's window is 16 KB.
@@ -17,41 +17,37 @@ impl Decompressor {
         while pos < out.len() {
             if bits.read(1) != 0 {
                 let byte = bits.read(8) as u8;
-                self.push_medium(byte);
+                push_window(&mut self.window[..], &mut self.medium_pos, MASK, byte);
                 out[pos] = byte;
                 pos += 1;
             } else {
                 let prefix = bits.read(8) as usize;
-                let length = u32::from(D_CODE[prefix]) + 3;
-                let distance = self.decode_medium_distance(&mut bits, prefix);
-                let mut src = self.medium_pos.wrapping_sub(distance).wrapping_sub(1);
-                for _ in 0..length {
-                    let byte = self.window[(src & MASK) as usize];
-                    self.push_medium(byte);
-                    src = src.wrapping_add(1);
-                    *out.get_mut(pos).ok_or(Corrupt)? = byte;
-                    pos += 1;
-                }
+                let length = u16::from(D_CODE[prefix]) + 3;
+                let distance = decode_medium_distance(&mut bits, prefix);
+                copy_match(
+                    &mut self.window[..],
+                    &mut self.medium_pos,
+                    MASK,
+                    distance,
+                    length,
+                    out,
+                    &mut pos,
+                )?;
             }
         }
         // The C nudges the window position by 66 between tracks.
         self.medium_pos = self.medium_pos.wrapping_add(66) & MASK;
         Ok(())
     }
+}
 
-    /// Two-level table decode of a match distance from an 8-bit `prefix`.
-    fn decode_medium_distance(&self, bits: &mut BitReader, prefix: usize) -> u16 {
-        let extra = u32::from(D_LEN[prefix]);
-        let mid = ((((prefix as u32) << extra) | u32::from(bits.read(extra))) & 0xff) as usize;
-        let extra = u32::from(D_LEN[mid]);
-        let low = (((mid as u32) << extra) | u32::from(bits.read(extra))) & 0xff;
-        ((u32::from(D_CODE[mid]) << 8) | low) as u16
-    }
-
-    fn push_medium(&mut self, byte: u8) {
-        self.window[(self.medium_pos & MASK) as usize] = byte;
-        self.medium_pos = self.medium_pos.wrapping_add(1);
-    }
+/// Two-level table decode of a match distance from an 8-bit `prefix`.
+fn decode_medium_distance(bits: &mut BitReader, prefix: usize) -> u16 {
+    let extra = u32::from(D_LEN[prefix]);
+    let mid = ((((prefix as u32) << extra) | u32::from(bits.read(extra))) & 0xff) as usize;
+    let extra = u32::from(D_LEN[mid]);
+    let low = (((mid as u32) << extra) | u32::from(bits.read(extra))) & 0xff;
+    ((u32::from(D_CODE[mid]) << 8) | low) as u16
 }
 
 #[cfg(test)]

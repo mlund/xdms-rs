@@ -1,7 +1,7 @@
 //! QUICK — a small-window LZ (ported from `u_quick.c`). One flag bit picks
 //! between a literal byte and a back-reference into a 256-byte window.
 
-use super::{Corrupt, Decompressor};
+use super::{copy_match, push_window, Corrupt, Decompressor};
 use crate::bitreader::BitReader;
 
 /// QUICK's window is 256 bytes.
@@ -16,30 +16,26 @@ impl Decompressor {
         while pos < out.len() {
             if bits.read(1) != 0 {
                 let byte = bits.read(8) as u8;
-                self.push_quick(byte);
+                push_window(&mut self.window[..], &mut self.quick_pos, MASK, byte);
                 out[pos] = byte;
                 pos += 1;
             } else {
-                let length = u32::from(bits.read(2)) + 2;
+                let length = bits.read(2) + 2;
                 let distance = bits.read(8);
-                let mut src = self.quick_pos.wrapping_sub(distance).wrapping_sub(1);
-                for _ in 0..length {
-                    let byte = self.window[(src & MASK) as usize];
-                    self.push_quick(byte);
-                    src = src.wrapping_add(1);
-                    *out.get_mut(pos).ok_or(Corrupt)? = byte;
-                    pos += 1;
-                }
+                copy_match(
+                    &mut self.window[..],
+                    &mut self.quick_pos,
+                    MASK,
+                    distance,
+                    length,
+                    out,
+                    &mut pos,
+                )?;
             }
         }
         // The C nudges the window position by 5 between tracks.
         self.quick_pos = self.quick_pos.wrapping_add(5) & MASK;
         Ok(())
-    }
-
-    fn push_quick(&mut self, byte: u8) {
-        self.window[(self.quick_pos & MASK) as usize] = byte;
-        self.quick_pos = self.quick_pos.wrapping_add(1);
     }
 }
 
