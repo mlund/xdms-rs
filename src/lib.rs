@@ -18,4 +18,5 @@
 
 extern crate alloc;
 
+mod bitreader;
 mod crc;
