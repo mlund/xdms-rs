@@ -168,12 +168,6 @@ impl Decompressor {
     }
 }
 
-impl Default for Decompressor {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 /// Writes `byte` to the sliding `window` at the current position and advances it.
 ///
 /// Shared by every LZ-family mode; `pos` and `mask` differ per mode (each keeps
