@@ -20,3 +20,8 @@ extern crate alloc;
 
 mod bitreader;
 mod crc;
+mod error;
+mod header;
+
+pub use error::{Error, Result};
+pub use header::{DiskType, GenInfo, Info, Mode};
