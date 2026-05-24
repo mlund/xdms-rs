@@ -1,4 +1,4 @@
-# xdms
+# xdms-rs
 
 A pure-Rust, dependency-free library for unpacking **DMS** (Disk Masher System)
 Amiga disk archives into raw **ADF** disk images.
@@ -60,6 +60,21 @@ their tests skip when absent, while the tiny RLE archive is committed under
 output. Run the suite with `cargo test`.
 
 [adf2dms]: https://github.com/dlitz/adf2dms
+
+## Performance
+
+Pure decode throughput vs the reference C `xdms`, both decoding the same
+public-domain disks to memory (Rust `--release`, C `-O2`, Apple arm64, startup
+amortized over 2000 iterations). Output is byte-identical.
+
+| Disk (mode) | Rust | C | speedup |
+| --- | --- | --- | --- |
+| GoldenFleece (HEAVY2) | 1.29 ms · 699 MB/s | 1.64 ms · 550 MB/s | 1.27× |
+| Gory_Story (HEAVY1) | 4.04 ms · 223 MB/s | 4.71 ms · 191 MB/s | 1.17× |
+
+Ballpark, single-machine numbers — but the idiomatic, bounds-checked port keeps
+pace with, and slightly beats, the C reference. (HEAVY1/HEAVY2 are what real disks
+use; they're also the only modes with byte-exact fixtures.)
 
 ## `no_std`
 
