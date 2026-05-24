@@ -20,6 +20,7 @@ extern crate alloc;
 
 mod bitreader;
 mod crc;
+mod decompress;
 mod error;
 mod header;
 
