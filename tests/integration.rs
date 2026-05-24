@@ -63,6 +63,31 @@ fn fixtures_decode_to_expected_adf() {
     }
 }
 
+/// Committed small fixture (`tests/data/rle_small.dms`): real SIMPLE/RLE output
+/// from the independent adf2dms encoder, carrying a banner and FILEID.DIZ. Always
+/// runs (no download needed). See `tests/data/README.md` for provenance.
+#[test]
+fn committed_rle_fixture() {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/data/rle_small.dms");
+    let dms = std::fs::read(path).unwrap();
+
+    let adf = xdms::unpack_bytes(&dms).unwrap();
+    assert_eq!(adf.len(), 22528);
+    assert_eq!(
+        hex(&sha256(&adf)),
+        "d032deb4a5008b234b68968699ab2a897250f0f32eeae0aea4b23fa99049f98c"
+    );
+
+    let mut archive = xdms::DmsArchive::read(std::io::Cursor::new(&dms)).unwrap();
+    let summary = archive.unpack_to(std::io::sink()).unwrap();
+    assert_eq!(summary.tracks, 2);
+    assert_eq!(summary.banner.as_deref(), Some("Made with adf2dms"));
+    assert_eq!(
+        summary.file_id.as_deref(),
+        Some("Small RLE test disk.\nTwo cylinders.")
+    );
+}
+
 fn hex(bytes: &[u8]) -> String {
     use std::fmt::Write;
     bytes.iter().fold(String::new(), |mut s, b| {
