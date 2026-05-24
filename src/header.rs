@@ -250,6 +250,31 @@ impl TryFrom<&[u8]> for Info {
     }
 }
 
+impl fmt::Display for Info {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let (major, minor) = (self.creator_version / 100, self.creator_version % 100);
+        writeln!(f, "DMS version {major}.{minor:02}")?;
+        writeln!(f, "tracks {} to {}", self.first_track, self.last_track)?;
+        writeln!(
+            f,
+            "packed {} bytes, unpacked {} bytes",
+            self.packed_size, self.unpacked_size
+        )?;
+        writeln!(f, "disk type: {}", self.disk_type)?;
+        match self.default_mode {
+            Some(mode) => writeln!(f, "default mode: {mode:?}")?,
+            None => writeln!(f, "default mode: unknown")?,
+        }
+        write!(
+            f,
+            "encrypted: {}, banner: {}, FILEID.DIZ: {}",
+            self.info.encrypted(),
+            self.info.banner(),
+            self.info.file_id()
+        )
+    }
+}
+
 /// The 20-byte header preceding each track's packed data. Crate-internal.
 #[derive(Debug, Clone, Copy)]
 pub struct TrackHeader {
@@ -375,6 +400,14 @@ mod tests {
     #[test]
     fn unknown_disk_type_round_trips_value() {
         assert_eq!(DiskType::from(42), DiskType::Unknown(42));
+    }
+
+    #[test]
+    fn info_display_is_human_readable() {
+        let info = Info::try_from(&archive_header()[..]).unwrap();
+        let text = alloc::format!("{info}");
+        assert!(text.contains("DMS version 1.23"));
+        assert!(text.contains("encrypted: true"));
     }
 
     #[test]

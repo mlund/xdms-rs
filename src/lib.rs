@@ -37,9 +37,10 @@ use crate::header::{TrackHeader, HEADER_LEN, TRACK_HEADER_LEN};
 
 /// Largest size (packed, intermediate, or unpacked) a single track may declare.
 const MAX_TRACK_LEN: usize = 32000;
-/// Standard-disk tracks are numbered below this; 80 is `FILEID.DIZ` and `0xFFFF`
-/// is the banner. Only lower-numbered, sufficiently large tracks form the ADF.
-const FIRST_SPECIAL_TRACK: u16 = 80;
+/// The `FILEID.DIZ` description track. Data tracks are numbered below it.
+const TRACK_FILE_ID: u16 = 80;
+/// The banner track.
+const TRACK_BANNER: u16 = 0xffff;
 /// A data track must unpack to more than this; smaller "track 0"s are fake boot
 /// blocks carrying advertising, not disk data.
 const MIN_DATA_TRACK_LEN: u16 = 2048;
@@ -113,14 +114,17 @@ fn drive(
     decompressor: &mut Decompressor,
     source: &mut dyn Source,
     sink: &mut dyn Sink,
-    _password: Option<&str>,
+    password: Option<&str>,
     salvage: bool,
 ) -> Result<Summary> {
-    if info.info.encrypted() && _password.is_none() {
+    if info.info.encrypted() && password.is_none() {
         return Err(Error::PasswordRequired);
     }
     decompressor.reset();
 
+    // The password CRC seeds a rotating cipher state that advances across every
+    // decrypted track (all but FILEID.DIZ), so it lives outside the loop.
+    let mut cipher = password.map(|p| crc16(p.as_bytes()));
     let mut summary = Summary::default();
     let mut header = [0u8; TRACK_HEADER_LEN];
     let mut packed = Vec::new();
@@ -155,9 +159,25 @@ fn drive(
             });
         }
 
-        // Banner, FILEID.DIZ, and fake boot blocks are not part of the ADF.
-        let is_data = track.number < FIRST_SPECIAL_TRACK && track.unpacked_len > MIN_DATA_TRACK_LEN;
-        if !is_data {
+        // Every track but FILEID.DIZ is decrypted (and advances the cipher).
+        if let Some(state) = cipher.as_mut() {
+            if track.number != TRACK_FILE_ID {
+                decrypt(&mut packed, state);
+            }
+        }
+
+        if track.number == TRACK_BANNER {
+            // Decoded on a throwaway decompressor so it can't disturb the data
+            // tracks' shared state (the C never decodes it during unpack).
+            summary.banner = decode_text(&track, &packed);
+            continue;
+        }
+        if track.number == TRACK_FILE_ID {
+            summary.file_id = decode_text(&track, &packed);
+            continue;
+        }
+        // Fake boot blocks and other small tracks are not part of the ADF.
+        if track.number >= TRACK_FILE_ID || track.unpacked_len <= MIN_DATA_TRACK_LEN {
             continue;
         }
 
@@ -197,6 +217,40 @@ fn drive(
     }
 
     Ok(summary)
+}
+
+/// Decrypts `data` in place with DMS's rotating XOR cipher, advancing `state`.
+/// `state` carries over between tracks (it is not reset per track).
+fn decrypt(data: &mut [u8], state: &mut u16) {
+    for byte in data.iter_mut() {
+        let stored = u16::from(*byte);
+        *byte ^= *state as u8;
+        *state = (*state >> 1).wrapping_add(stored);
+    }
+}
+
+/// Best-effort decode of a banner / FILEID.DIZ track to text. Uses a fresh
+/// decompressor (these are auxiliary tracks the C decodes from a clean state) and
+/// returns `None` rather than failing the whole archive if it can't be decoded.
+fn decode_text(track: &TrackHeader, packed: &[u8]) -> Option<String> {
+    let mode = Mode::try_from(track.mode).ok()?;
+    let mut out = vec![0u8; track.unpacked_len as usize];
+    Decompressor::new()
+        .unpack_track(
+            mode,
+            track.flags,
+            packed,
+            track.intermediate_len as usize,
+            &mut out,
+        )
+        .ok()?;
+    Some(text_from(&out))
+}
+
+/// Renders decoded banner/DIZ bytes as text, dropping trailing NUL padding.
+fn text_from(bytes: &[u8]) -> String {
+    let end = bytes.iter().rposition(|&b| b != 0).map_or(0, |i| i + 1);
+    String::from_utf8_lossy(&bytes[..end]).into_owned()
 }
 
 /// Decompresses an in-memory DMS archive into an ADF image.
@@ -417,8 +471,13 @@ mod tests {
     }
 
     fn archive(tracks: &[Vec<u8>]) -> Vec<u8> {
+        archive_with(0, tracks)
+    }
+
+    fn archive_with(geninfo: u16, tracks: &[Vec<u8>]) -> Vec<u8> {
         let mut h = vec![0u8; HEADER_LEN];
         h[0..4].copy_from_slice(b"DMS!");
+        h[10..12].copy_from_slice(&geninfo.to_be_bytes());
         h[50..52].copy_from_slice(&2u16.to_be_bytes()); // disk type FFS (not FMS)
         let crc = crc16(&h[4..54]);
         h[54..56].copy_from_slice(&crc.to_be_bytes());
@@ -426,6 +485,17 @@ mod tests {
             h.extend_from_slice(t);
         }
         h
+    }
+
+    /// Forward of the DMS cipher: produces bytes that [`decrypt`] recovers.
+    fn encrypt(data: &[u8], mut state: u16) -> Vec<u8> {
+        data.iter()
+            .map(|&p| {
+                let c = p ^ state as u8;
+                state = (state >> 1).wrapping_add(u16::from(c));
+                c
+            })
+            .collect()
     }
 
     #[test]
@@ -484,5 +554,59 @@ mod tests {
     #[test]
     fn rejects_non_dms() {
         assert!(matches!(unpack_bytes(&[b'X'; 60]), Err(Error::NotDms)));
+    }
+
+    const GENINFO_ENCRYPTED: u16 = 0x02;
+
+    #[test]
+    fn decrypts_with_correct_password() {
+        let plain = vec![0xC3u8; 3000];
+        let seed = crc16(b"secret");
+        let cipher = encrypt(&plain, seed);
+        let dms = archive_with(GENINFO_ENCRYPTED, &[track(0, 0, &cipher, &plain)]);
+
+        let mut arch = DmsArchive::read(&dms[..]).unwrap().with_password("secret");
+        assert_eq!(arch.unpack_to_vec().unwrap(), plain);
+    }
+
+    #[test]
+    fn encrypted_archive_without_password_is_rejected() {
+        let plain = vec![0xC3u8; 3000];
+        let cipher = encrypt(&plain, crc16(b"secret"));
+        let dms = archive_with(GENINFO_ENCRYPTED, &[track(0, 0, &cipher, &plain)]);
+        assert!(matches!(
+            DmsArchive::read(&dms[..]).unwrap().unpack_to_vec(),
+            Err(Error::PasswordRequired)
+        ));
+    }
+
+    #[test]
+    fn wrong_password_is_detected() {
+        let plain = vec![0xC3u8; 3000];
+        let cipher = encrypt(&plain, crc16(b"secret"));
+        let dms = archive_with(GENINFO_ENCRYPTED, &[track(0, 0, &cipher, &plain)]);
+        let result = DmsArchive::read(&dms[..])
+            .unwrap()
+            .with_password("wrong")
+            .unpack_to_vec();
+        assert!(matches!(result, Err(Error::Checksum { .. })));
+    }
+
+    #[test]
+    fn captures_banner_and_file_id() {
+        let data = vec![9u8; 3000];
+        let dms = archive(&[
+            track(0xffff, 0, b"Cracked by nobody", b"Cracked by nobody"),
+            track(80, 0, b"FILEID text", b"FILEID text"),
+            track(0, 0, &data, &data),
+        ]);
+
+        let mut arch = DmsArchive::read(&dms[..]).unwrap();
+        let mut adf = Vec::new();
+        let summary = arch.unpack_to(&mut adf).unwrap();
+        assert_eq!(adf, data); // only the data track reaches the ADF
+        assert_eq!(summary.tracks, 1);
+        assert_eq!(summary.banner.as_deref(), Some("Cracked by nobody"));
+        assert_eq!(summary.file_id.as_deref(), Some("FILEID text"));
     }
 }
