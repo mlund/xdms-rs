@@ -5,8 +5,12 @@
 //! that state lives in a single [`Decompressor`] that the drive loop reuses
 //! across tracks (DMS lets a track continue from the previous track's state).
 
+mod deep;
 mod heavy;
+mod medium;
+mod quick;
 mod rle;
+mod tables;
 
 use alloc::boxed::Box;
 use alloc::vec;
@@ -28,6 +32,12 @@ const HEAVY_NC: usize = 510;
 /// Number of HEAVY position-tree codes (the C `NPT`).
 const HEAVY_NPT: usize = 20;
 
+/// DEEP symbol count: 256 literals minus the threshold plus the lookahead size
+/// (the C `N_CHAR = 256 - THRESHOLD + F`).
+const DEEP_N_CHAR: usize = 256 - 2 + 60;
+/// DEEP Huffman table size (the C `T = N_CHAR * 2 - 1`).
+const DEEP_T: usize = DEEP_N_CHAR * 2 - 1;
+
 /// Returned by a decompressor when the compressed stream is invalid (truncated,
 /// corrupt, or decrypted with the wrong password). The drive loop attaches the
 /// track number to turn this into [`crate::Error::BadData`].
@@ -35,7 +45,8 @@ const HEAVY_NPT: usize = 20;
 pub struct Corrupt;
 
 /// Holds the sliding window and per-mode positions/tables that persist across
-/// tracks. The HEAVY Huffman tables are rebuilt per track only when asked.
+/// tracks. HEAVY's Huffman tables are rebuilt per track only when asked; DEEP's
+/// adaptive tree evolves continuously.
 pub struct Decompressor {
     window: Box<[u8; WINDOW_SIZE]>,
     quick_pos: u16,
@@ -52,6 +63,11 @@ pub struct Decompressor {
     pt_table: [u16; 256],
     left: Box<[u16; 2 * HEAVY_NC - 1]>,
     right: Box<[u16; 2 * HEAVY_NC - 1 + 9]>,
+    // DEEP adaptive-Huffman tree.
+    deep_freq: Box<[u16; DEEP_T + 1]>,
+    deep_prnt: Box<[u16; DEEP_T + DEEP_N_CHAR]>,
+    deep_son: Box<[u16; DEEP_T]>,
+    deep_init: bool,
 }
 
 impl Decompressor {
@@ -70,6 +86,10 @@ impl Decompressor {
             pt_table: [0; 256],
             left: Box::new([0; 2 * HEAVY_NC - 1]),
             right: Box::new([0; 2 * HEAVY_NC - 1 + 9]),
+            deep_freq: Box::new([0; DEEP_T + 1]),
+            deep_prnt: Box::new([0; DEEP_T + DEEP_N_CHAR]),
+            deep_son: Box::new([0; DEEP_T]),
+            deep_init: true,
         };
         decompressor.reset();
         decompressor
@@ -77,14 +97,15 @@ impl Decompressor {
 
     /// Reinitialises window positions and clears the window (the C
     /// `Init_Decrunchers`). The drive loop calls this between tracks unless the
-    /// track asks to keep state. The HEAVY tables are not touched here — they
-    /// persist (or are rebuilt) per the track flags, as in the C.
+    /// track asks to keep state. HEAVY's tables persist/rebuild per the track
+    /// flags; DEEP's tree is flagged for rebuild here, as in the C.
     pub fn reset(&mut self) {
         self.quick_pos = QUICK_INIT_POS;
         self.medium_pos = MEDIUM_INIT_POS;
         self.deep_pos = DEEP_INIT_POS;
         self.heavy_pos = 0;
         self.heavy_last_match_len = 0;
+        self.deep_init = true;
         self.window[..WINDOW_CLEAR].fill(0);
     }
 
@@ -107,8 +128,9 @@ impl Decompressor {
                 Ok(())
             }
             Mode::Simple => rle::unpack_rle(packed, out),
-            // QUICK/MEDIUM/DEEP land in a subsequent commit.
-            Mode::Quick | Mode::Medium | Mode::Deep => Err(Corrupt),
+            Mode::Quick => self.staged(packed, intermediate_len, out, Self::unpack_quick),
+            Mode::Medium => self.staged(packed, intermediate_len, out, Self::unpack_medium),
+            Mode::Deep => self.staged(packed, intermediate_len, out, Self::unpack_deep),
             Mode::Heavy1 | Mode::Heavy2 => {
                 let mut stage1 = vec![0u8; intermediate_len];
                 self.unpack_heavy(
@@ -126,6 +148,23 @@ impl Decompressor {
                 }
             }
         }
+    }
+
+    /// Runs a first-stage decoder into a scratch buffer, then the RLE pass into
+    /// `out` — the shape shared by QUICK, MEDIUM, and DEEP.
+    fn staged<F>(
+        &mut self,
+        packed: &[u8],
+        intermediate_len: usize,
+        out: &mut [u8],
+        decode: F,
+    ) -> Result<(), Corrupt>
+    where
+        F: FnOnce(&mut Self, &[u8], &mut [u8]) -> Result<(), Corrupt>,
+    {
+        let mut stage1 = vec![0u8; intermediate_len];
+        decode(self, packed, &mut stage1)?;
+        rle::unpack_rle(&stage1, out)
     }
 }
 

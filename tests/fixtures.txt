@@ -5,6 +5,12 @@
 # absent. Expected ADF hashes were produced once by the reference C xdms and are
 # the oracle the Rust decoder is checked against.
 #
+# Mode coverage: the IF Archive games are all HEAVY1/HEAVY2, so those have full
+# byte-for-byte oracle coverage. NOCOMP/SIMPLE are covered by synthetic unit
+# tests; QUICK and MEDIUM by literal/match round-trip unit tests. No public DMS
+# samples using the obsolete QUICK/MEDIUM/DEEP modes were found, so DEEP has no
+# end-to-end oracle fixture yet — add one here if a sample surfaces.
+#
 # Columns: <name> <url> <mode> <adf_sha256> <adf_len>
 GoldenFleece.dms https://www.ifarchive.org/if-archive/games/amiga/GoldenFleece.dms HEAVY2 53a971729fa34e42708a94ceb79a6ce76ab311e5f2aec060135b4b287891b505 901120
 Gory_Story.dms https://www.ifarchive.org/if-archive/games/amiga/Gory_Story.dms HEAVY1 67261c08ea5e4deb17c2e33fdd09c6a947480c193b0a24a2dc4dcf8a8b0bc803 901120
