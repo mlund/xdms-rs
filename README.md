@@ -72,10 +72,6 @@ amortized over 2000 iterations). Output is byte-identical.
 | GoldenFleece (HEAVY2) | 1.29 ms · 699 MB/s | 1.64 ms · 550 MB/s | 1.27× |
 | Gory_Story (HEAVY1) | 4.04 ms · 223 MB/s | 4.71 ms · 191 MB/s | 1.17× |
 
-Ballpark, single-machine numbers — but the idiomatic, bounds-checked port keeps
-pace with, and slightly beats, the C reference. (HEAVY1/HEAVY2 are what real disks
-use; they're also the only modes with byte-exact fixtures.)
-
 ## `no_std`
 
 The crate is `no_std` + `alloc` when built with `default-features = false`; the
