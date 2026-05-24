@@ -1,0 +1,6 @@
+/target
+Cargo.lock
+
+# Downloaded test fixtures are never committed (fetched on demand, see
+# examples/fetch_fixtures.rs). Repo stays free of binary blobs.
+/tests/fixtures/

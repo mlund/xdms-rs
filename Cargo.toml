@@ -1,0 +1,24 @@
+[package]
+name = "xdms"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.81"
+description = "Pure-Rust, dependency-free unpacker for DMS (Disk Masher System) Amiga disk archives into raw ADF disk images."
+authors = ["Mikael Lund"]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/mlund/xdms-rs"
+readme = "README.md"
+keywords = ["dms", "adf", "amiga", "decompression", "no_std"]
+categories = ["compression", "encoding", "no-std"]
+exclude = ["tests/fixtures/"]
+
+[features]
+default = ["std"]
+# `std` adds the std::io Read/Write API and From<std::io::Error>. Without it the
+# crate is no_std (alloc only), exposing slice-in / Vec-out entry points.
+std = []
+
+[lints.clippy]
+nursery = { level = "warn", priority = -1 }
+
+[dependencies]
