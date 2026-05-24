@@ -13,7 +13,7 @@ mod rle;
 mod tables;
 
 use alloc::boxed::Box;
-use alloc::vec;
+use alloc::vec::Vec;
 
 use crate::header::{Mode, TrackFlags};
 
@@ -68,6 +68,9 @@ pub struct Decompressor {
     deep_prnt: Box<[u16; DEEP_T + DEEP_N_CHAR]>,
     deep_son: Box<[u16; DEEP_T]>,
     deep_init: bool,
+    /// Reused first-stage buffer for the two-stage modes, so processing many
+    /// tracks doesn't allocate one per track.
+    scratch: Vec<u8>,
 }
 
 impl Decompressor {
@@ -90,6 +93,7 @@ impl Decompressor {
             deep_prnt: Box::new([0; DEEP_T + DEEP_N_CHAR]),
             deep_son: Box::new([0; DEEP_T]),
             deep_init: true,
+            scratch: Vec::new(),
         };
         decompressor.reset();
         decompressor
@@ -128,43 +132,47 @@ impl Decompressor {
                 Ok(())
             }
             Mode::Simple => rle::unpack_rle(packed, out),
-            Mode::Quick => self.staged(packed, intermediate_len, out, Self::unpack_quick),
-            Mode::Medium => self.staged(packed, intermediate_len, out, Self::unpack_medium),
-            Mode::Deep => self.staged(packed, intermediate_len, out, Self::unpack_deep),
-            Mode::Heavy1 | Mode::Heavy2 => {
-                let mut stage1 = vec![0u8; intermediate_len];
-                self.unpack_heavy(
+            Mode::Quick => self.with_scratch(intermediate_len, |me, stage1| {
+                me.unpack_quick(packed, stage1)?;
+                rle::unpack_rle(stage1, out)
+            }),
+            Mode::Medium => self.with_scratch(intermediate_len, |me, stage1| {
+                me.unpack_medium(packed, stage1)?;
+                rle::unpack_rle(stage1, out)
+            }),
+            Mode::Deep => self.with_scratch(intermediate_len, |me, stage1| {
+                me.unpack_deep(packed, stage1)?;
+                rle::unpack_rle(stage1, out)
+            }),
+            Mode::Heavy1 | Mode::Heavy2 => self.with_scratch(intermediate_len, |me, stage1| {
+                me.unpack_heavy(
                     mode == Mode::Heavy2,
                     flags.heavy_rebuild_trees(),
                     packed,
-                    &mut stage1,
+                    stage1,
                 )?;
                 if flags.heavy_rle() {
-                    rle::unpack_rle(&stage1, out)
+                    rle::unpack_rle(stage1, out)
                 } else {
                     let src = stage1.get(..out.len()).ok_or(Corrupt)?;
                     out.copy_from_slice(src);
                     Ok(())
                 }
-            }
+            }),
         }
     }
 
-    /// Runs a first-stage decoder into a scratch buffer, then the RLE pass into
-    /// `out` — the shape shared by QUICK, MEDIUM, and DEEP.
-    fn staged<F>(
-        &mut self,
-        packed: &[u8],
-        intermediate_len: usize,
-        out: &mut [u8],
-        decode: F,
-    ) -> Result<(), Corrupt>
-    where
-        F: FnOnce(&mut Self, &[u8], &mut [u8]) -> Result<(), Corrupt>,
-    {
-        let mut stage1 = vec![0u8; intermediate_len];
-        decode(self, packed, &mut stage1)?;
-        rle::unpack_rle(&stage1, out)
+    /// Runs `decode` over a reusable, zeroed scratch buffer of `len` bytes — the
+    /// first stage for the two-stage modes (QUICK/MEDIUM/DEEP/HEAVY). The buffer
+    /// is borrowed out of `self` for the call and returned afterwards (keeping its
+    /// capacity), so back-to-back tracks reuse one allocation.
+    fn with_scratch<R>(&mut self, len: usize, decode: impl FnOnce(&mut Self, &mut [u8]) -> R) -> R {
+        let mut scratch = core::mem::take(&mut self.scratch);
+        scratch.clear();
+        scratch.resize(len, 0);
+        let result = decode(self, &mut scratch);
+        self.scratch = scratch;
+        result
     }
 }
 

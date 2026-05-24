@@ -125,7 +125,9 @@ fn drive(
     let mut cipher = password.map(|p| crc16(p.as_bytes()));
     let mut summary = Summary::default();
     let mut header = [0u8; TRACK_HEADER_LEN];
+    // Reused across tracks so the loop allocates these buffers once, not per track.
     let mut packed = Vec::new();
+    let mut out = Vec::new();
 
     loop {
         if !source.read_block(&mut header)? {
@@ -180,7 +182,10 @@ fn drive(
         }
 
         let mode = Mode::try_from(track.mode)?;
-        let mut out = vec![0u8; track.unpacked_len as usize];
+        // Zeroed to the track length (matching the C's pre-decode memset, so a
+        // salvaged partial decode leaves no stale bytes from the previous track).
+        out.clear();
+        out.resize(track.unpacked_len as usize, 0);
         match decompressor.unpack_track(
             mode,
             track.flags,
