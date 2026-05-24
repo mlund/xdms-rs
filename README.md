@@ -11,31 +11,6 @@ the de-facto Amiga standard for storing non-DOS disks (games, demos); emulators
 expect ADF/ADZ instead. The original C decoder is the reference for this port.
 Dual-licensed **MIT OR Apache-2.0**.
 
-## Design goals
-
-The port was planned around a few deliberate choices:
-
-- **Deep modules, small surface.** A handful of types (`DmsArchive`, `Info`,
-  `Summary`, `Error`) and a few one-liner functions; every decompressor, bit
-  reader, Huffman table, and sliding window is hidden behind one `Decompressor`.
-- **Idiomatic, expressive Rust — not a C transliteration.** The C's magic
-  integers become enums/newtypes (`Mode`, `DiskType`, `GenInfo`, `TrackFlags`),
-  its `#define`s become named constants, and byte parsing/validation lives in
-  `From`/`TryFrom` impls. Names say what they mean (`packed_len`, not `pklen1`).
-- **Very few dependencies — in fact zero.** No runtime *or* dev dependencies;
-  CRC-16, the bit reader, the Huffman builders, and even the tests' SHA-256 are
-  implemented in-crate.
-- **`core`/`alloc`-first.** The engine uses only `core` and `alloc`; `std::io`
-  is confined behind a default `std` feature, so a `no_std` build is mechanical.
-- **Faithful and byte-exact.** Output is validated to match the reference C
-  `xdms` bit-for-bit; decode loops mirror the original algorithms closely.
-- **Test-driven, with an oracle.** Built red→green→refactor, using the original
-  C binary (and the independent `adf2dms` encoder) as golden references.
-- **Portable and linted.** Pure-Rust engine with no platform APIs; CI covers
-  Linux/macOS/Windows plus a `no_std` build, with Clippy's nursery lints on.
-- **Comments explain *why*, not *what*** — reserved for format quirks and
-  porting rationale.
-
 ## Usage
 
 ```rust,no_run
@@ -90,6 +65,35 @@ output. Run the suite with `cargo test`.
 
 The crate is `no_std` + `alloc` when built with `default-features = false`; the
 `std` feature (on by default) adds the `std::io` `Read`/`Write` API.
+
+## Design goals
+
+The port was planned around a few deliberate choices:
+
+- **Deep modules, small surface.** A handful of types (`DmsArchive`, `Info`,
+  `Summary`, `Error`) and a few one-liner functions; every decompressor, bit
+  reader, Huffman table, and sliding window is hidden behind one `Decompressor`.
+- **Idiomatic, expressive Rust — not a C transliteration.** The C's magic
+  integers become enums/newtypes (`Mode`, `DiskType`, `GenInfo`, `TrackFlags`),
+  its `#define`s become named constants, and byte parsing/validation lives in
+  `From`/`TryFrom` impls. Names say what they mean (`packed_len`, not `pklen1`).
+- **Very few dependencies — in fact zero.** No runtime *or* dev dependencies;
+  CRC-16, the bit reader, the Huffman builders, and even the tests' SHA-256 are
+  implemented in-crate.
+- **`core`/`alloc`-first.** The engine uses only `core` and `alloc`; `std::io`
+  is confined behind a default `std` feature, so a `no_std` build is mechanical.
+- **Faithful and byte-exact.** Output is validated to match the reference C
+  `xdms` bit-for-bit; decode loops mirror the original algorithms closely.
+- **Test-driven, with an oracle.** Built red→green→refactor, using the original
+  C binary (and the independent `adf2dms` encoder) as golden references.
+- **Portable and linted.** Pure-Rust engine with no platform APIs; CI covers
+  Linux/macOS/Windows plus a `no_std` build, with Clippy's nursery lints on.
+- **Comments explain *why*, not *what*** — reserved for format quirks and
+  porting rationale.
+
+Assistance of Claude Opus 4.7 was used, adhering to the
+[LLVM AI tool use policy](https://llvm.org/docs/AIToolPolicy.html).
+
 
 ## License
 
