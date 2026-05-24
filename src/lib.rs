@@ -163,7 +163,13 @@ fn drive(
 
         let mode = Mode::try_from(track.mode)?;
         let mut out = vec![0u8; track.unpacked_len as usize];
-        match decompressor.unpack_track(mode, &packed, &mut out) {
+        match decompressor.unpack_track(
+            mode,
+            track.flags,
+            &packed,
+            track.intermediate_len as usize,
+            &mut out,
+        ) {
             Ok(()) => {
                 // The C resets between tracks unless the keep-state flag is set,
                 // and only after a successful decode (errors return early).

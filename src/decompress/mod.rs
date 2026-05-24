@@ -5,11 +5,13 @@
 //! that state lives in a single [`Decompressor`] that the drive loop reuses
 //! across tracks (DMS lets a track continue from the previous track's state).
 
+mod heavy;
 mod rle;
 
 use alloc::boxed::Box;
+use alloc::vec;
 
-use crate::header::Mode;
+use crate::header::{Mode, TrackFlags};
 
 /// Usable size of the sliding window. The widest mode (MEDIUM/DEEP) masks
 /// positions to `0x3fff`, so indices never reach `0x4000`.
@@ -21,13 +23,19 @@ const QUICK_INIT_POS: u16 = 251;
 const MEDIUM_INIT_POS: u16 = 0x3fbe;
 const DEEP_INIT_POS: u16 = 0x3fc4;
 
+/// Number of HEAVY character/length codes (the C `NC`).
+const HEAVY_NC: usize = 510;
+/// Number of HEAVY position-tree codes (the C `NPT`).
+const HEAVY_NPT: usize = 20;
+
 /// Returned by a decompressor when the compressed stream is invalid (truncated,
 /// corrupt, or decrypted with the wrong password). The drive loop attaches the
 /// track number to turn this into [`crate::Error::BadData`].
 #[derive(Debug)]
 pub struct Corrupt;
 
-/// Holds the sliding window and per-mode positions that persist across tracks.
+/// Holds the sliding window and per-mode positions/tables that persist across
+/// tracks. The HEAVY Huffman tables are rebuilt per track only when asked.
 pub struct Decompressor {
     window: Box<[u8; WINDOW_SIZE]>,
     quick_pos: u16,
@@ -35,6 +43,15 @@ pub struct Decompressor {
     deep_pos: u16,
     heavy_pos: u16,
     heavy_last_match_len: u16,
+    // HEAVY Huffman state. `left`/`right` hold internal-node children and are
+    // shared by the character and position trees (their index ranges don't
+    // overlap, so both survive between decode_c/decode_p calls).
+    c_len: [u8; HEAVY_NC],
+    pt_len: [u8; HEAVY_NPT],
+    c_table: Box<[u16; 4096]>,
+    pt_table: [u16; 256],
+    left: Box<[u16; 2 * HEAVY_NC - 1]>,
+    right: Box<[u16; 2 * HEAVY_NC - 1 + 9]>,
 }
 
 impl Decompressor {
@@ -47,6 +64,12 @@ impl Decompressor {
             deep_pos: 0,
             heavy_pos: 0,
             heavy_last_match_len: 0,
+            c_len: [0; HEAVY_NC],
+            pt_len: [0; HEAVY_NPT],
+            c_table: Box::new([0; 4096]),
+            pt_table: [0; 256],
+            left: Box::new([0; 2 * HEAVY_NC - 1]),
+            right: Box::new([0; 2 * HEAVY_NC - 1 + 9]),
         };
         decompressor.reset();
         decompressor
@@ -54,7 +77,8 @@ impl Decompressor {
 
     /// Reinitialises window positions and clears the window (the C
     /// `Init_Decrunchers`). The drive loop calls this between tracks unless the
-    /// track asks to keep state.
+    /// track asks to keep state. The HEAVY tables are not touched here — they
+    /// persist (or are rebuilt) per the track flags, as in the C.
     pub fn reset(&mut self) {
         self.quick_pos = QUICK_INIT_POS;
         self.medium_pos = MEDIUM_INIT_POS;
@@ -65,16 +89,15 @@ impl Decompressor {
     }
 
     /// Decodes one track's `packed` bytes into `out` (whose length is the track's
-    /// unpacked length). State carries over to the next call unless the caller
+    /// unpacked length). `intermediate_len` is the size after the first stage
+    /// (the C `pklen2`). State carries over to the next call unless the caller
     /// resets in between.
-    // `&mut self` is required once the stateful modes (QUICK/MEDIUM/DEEP/HEAVY)
-    // land — they advance the window and positions. None/Simple don't, so clippy
-    // can't yet see the mutation.
-    #[allow(clippy::needless_pass_by_ref_mut)]
     pub fn unpack_track(
         &mut self,
         mode: Mode,
+        flags: TrackFlags,
         packed: &[u8],
+        intermediate_len: usize,
         out: &mut [u8],
     ) -> Result<(), Corrupt> {
         match mode {
@@ -84,8 +107,24 @@ impl Decompressor {
                 Ok(())
             }
             Mode::Simple => rle::unpack_rle(packed, out),
-            // QUICK/MEDIUM/DEEP/HEAVY land in subsequent commits.
-            _ => Err(Corrupt),
+            // QUICK/MEDIUM/DEEP land in a subsequent commit.
+            Mode::Quick | Mode::Medium | Mode::Deep => Err(Corrupt),
+            Mode::Heavy1 | Mode::Heavy2 => {
+                let mut stage1 = vec![0u8; intermediate_len];
+                self.unpack_heavy(
+                    mode == Mode::Heavy2,
+                    flags.heavy_rebuild_trees(),
+                    packed,
+                    &mut stage1,
+                )?;
+                if flags.heavy_rle() {
+                    rle::unpack_rle(&stage1, out)
+                } else {
+                    let src = stage1.get(..out.len()).ok_or(Corrupt)?;
+                    out.copy_from_slice(src);
+                    Ok(())
+                }
+            }
         }
     }
 }

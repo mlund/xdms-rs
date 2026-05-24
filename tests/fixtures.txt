@@ -1,0 +1,10 @@
+# Test fixtures: real public-domain DMS disk images from the IF Archive.
+#
+# Binaries are NOT committed. Run `cargo run --example fetch_fixtures` to download
+# them into tests/fixtures/ (gitignored); integration tests skip any that are
+# absent. Expected ADF hashes were produced once by the reference C xdms and are
+# the oracle the Rust decoder is checked against.
+#
+# Columns: <name> <url> <mode> <adf_sha256> <adf_len>
+GoldenFleece.dms https://www.ifarchive.org/if-archive/games/amiga/GoldenFleece.dms HEAVY2 53a971729fa34e42708a94ceb79a6ce76ab311e5f2aec060135b4b287891b505 901120
+Gory_Story.dms https://www.ifarchive.org/if-archive/games/amiga/Gory_Story.dms HEAVY1 67261c08ea5e4deb17c2e33fdd09c6a947480c193b0a24a2dc4dcf8a8b0bc803 901120
