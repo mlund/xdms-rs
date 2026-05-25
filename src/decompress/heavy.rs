@@ -12,7 +12,8 @@ use crate::bitreader::BitReader;
 
 /// Character codes below this are literals; the rest index internal tree nodes.
 const N1: u16 = HEAVY_NC as u16;
-/// Match lengths are encoded as `code - OFFSET` (so code 256 means length 3).
+/// Match lengths are `code - OFFSET`: 253 = 256 - 3, the minimum match length
+/// (so code 256 means length 3).
 const OFFSET: u16 = 253;
 
 impl Decompressor {
@@ -26,6 +27,8 @@ impl Decompressor {
         packed: &[u8],
         out: &mut [u8],
     ) -> Result<(), Corrupt> {
+        // np = position-tree code count = log2(window) + 2 (HEAVY1: 4 KB -> 14,
+        // HEAVY2: 8 KB -> 15); mask is window_size - 1.
         let (np, mask): (u16, u16) = if big_dict { (15, 0x1fff) } else { (14, 0x0fff) };
         let mut bits = BitReader::new(packed);
 

@@ -14,7 +14,8 @@ const R: usize = T - 1;
 const MAX_FREQ: u16 = 0x8000;
 /// DEEP's window is 16 KB.
 const MASK: u16 = 0x3fff;
-/// Match lengths are `code - 253` (code 256 -> length 3), as in the C.
+/// Match lengths are `code - 253`: codes 256.. are lengths and 3 is the minimum
+/// match, so 253 = 256 - 3 (code 256 -> length 3), as in the C.
 const LENGTH_BIAS: u16 = 253;
 
 impl Decompressor {
@@ -46,6 +47,8 @@ impl Decompressor {
                 )?;
             }
         }
+        // Advance by DEEP's max match length (F = 60) so a state-keeping next
+        // track stays aligned with the encoder; see the init-position note in `mod.rs`.
         self.deep_pos = self.deep_pos.wrapping_add(60) & MASK;
         Ok(())
     }

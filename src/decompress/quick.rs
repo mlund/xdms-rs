@@ -33,7 +33,8 @@ impl Decompressor {
                 )?;
             }
         }
-        // The C nudges the window position by 5 between tracks.
+        // Advance by QUICK's max match length (5) so a state-keeping next track
+        // stays aligned with the encoder; see the init-position note in `mod.rs`.
         self.quick_pos = self.quick_pos.wrapping_add(5) & MASK;
         Ok(())
     }

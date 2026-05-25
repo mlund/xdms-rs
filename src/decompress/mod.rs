@@ -23,9 +23,15 @@ const WINDOW_SIZE: usize = 0x4000;
 /// Bytes cleared on reset, matching the C `Init_Decrunchers` (which deliberately
 /// leaves the tail untouched between tracks).
 const WINDOW_CLEAR: usize = 0x3fc8;
-const QUICK_INIT_POS: u16 = 251;
-const MEDIUM_INIT_POS: u16 = 0x3fbe;
-const DEEP_INIT_POS: u16 = 0x3fc4;
+// Per-mode initial window position. Each window starts `F` bytes short of its
+// end, where `F` is the mode's lookahead (its maximum match length): QUICK 5,
+// MEDIUM 66, DEEP 60. The encoder starts at the same offset and advances the
+// position by `F` at the end of every track (the `wrapping_add` in quick/medium/
+// deep), so a track that keeps state stays phase-aligned with the encoder. Each
+// value is therefore the mode's window size minus `F`.
+const QUICK_INIT_POS: u16 = 251; // 256 - 5
+const MEDIUM_INIT_POS: u16 = 0x3fbe; // 0x4000 - 66
+const DEEP_INIT_POS: u16 = 0x3fc4; // 0x4000 - 60
 
 /// Number of HEAVY character/length codes (the C `NC`).
 const HEAVY_NC: usize = 510;

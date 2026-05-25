@@ -35,7 +35,8 @@ impl Decompressor {
                 )?;
             }
         }
-        // The C nudges the window position by 66 between tracks.
+        // Advance by MEDIUM's max match length (66) so a state-keeping next track
+        // stays aligned with the encoder; see the init-position note in `mod.rs`.
         self.medium_pos = self.medium_pos.wrapping_add(66) & MASK;
         Ok(())
     }
