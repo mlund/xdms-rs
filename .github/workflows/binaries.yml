@@ -1,9 +1,13 @@
-name: Build binaries
+name: Release binaries
 
-# Manually triggered from the Actions tab. Builds the `xdms-rs` CLI for each
-# platform and uploads a packaged archive as a workflow artifact.
+# Runs when a GitHub release is published: builds the `xdms-rs` CLI for each
+# platform and attaches a packaged archive to that release.
 on:
-  workflow_dispatch:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
 
 env:
   CARGO_TERM_COLOR: always
@@ -78,8 +82,8 @@ jobs:
             echo "ASSET=$staging.tar.gz" >> "$GITHUB_ENV"
           fi
 
-      - uses: actions/upload-artifact@v5
-        with:
-          name: xdms-rs-${{ matrix.target }}
-          path: ${{ env.ASSET }}
-          if-no-files-found: error
+      - name: Attach to release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ github.event.release.tag_name }}" "$ASSET" --clobber
