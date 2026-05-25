@@ -1,0 +1,62 @@
+name: Build binaries
+
+# Manually triggered from the Actions tab. Builds the `xdms-rs` CLI for each
+# platform and uploads a packaged archive as a workflow artifact.
+on:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+          - os: macos-latest
+            target: aarch64-apple-darwin
+          - os: macos-13
+            target: x86_64-apple-darwin
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - run: cargo build --release --bin xdms-rs --target ${{ matrix.target }}
+
+      - name: Package
+        shell: bash
+        run: |
+          set -euo pipefail
+          staging="xdms-rs-${{ matrix.target }}"
+          mkdir "$staging"
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            cp "target/${{ matrix.target }}/release/xdms-rs.exe" "$staging/"
+          else
+            cp "target/${{ matrix.target }}/release/xdms-rs" "$staging/"
+          fi
+          cp README.md LICENSE-MIT LICENSE-APACHE "$staging/"
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            7z a "$staging.zip" "$staging" >/dev/null
+            echo "ASSET=$staging.zip" >> "$GITHUB_ENV"
+          else
+            tar czf "$staging.tar.gz" "$staging"
+            echo "ASSET=$staging.tar.gz" >> "$GITHUB_ENV"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: xdms-rs-${{ matrix.target }}
+          path: ${{ env.ASSET }}
+          if-no-files-found: error
