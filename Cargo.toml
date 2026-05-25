@@ -18,6 +18,12 @@ default = ["std"]
 # crate is no_std (alloc only), exposing slice-in / Vec-out entry points.
 std = []
 
+# The CLI uses the std-only API, so it is skipped on --no-default-features builds.
+[[bin]]
+name = "xdms-rs"
+path = "src/main.rs"
+required-features = ["std"]
+
 [lints.clippy]
 nursery = { level = "warn", priority = -1 }
 
