@@ -1,6 +1,6 @@
 [package]
 name = "xdms"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 rust-version = "1.81"
 description = "Pure-Rust, dependency-free unpacker for DMS (Disk Masher System) Amiga disk archives into raw ADF disk images."
@@ -26,5 +26,11 @@ required-features = ["std"]
 
 [lints.clippy]
 nursery = { level = "warn", priority = -1 }
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true
 
 [dependencies]
