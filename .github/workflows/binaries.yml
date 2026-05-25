@@ -16,24 +16,47 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # Linux: glibc (native to the build distro) and musl (fully static).
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
           - os: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
+          # macOS: universal2 (arm64 + x86_64), both built on this Apple Silicon
+          # runner and merged with lipo — no separate Intel runner needed.
           - os: macos-latest
-            target: aarch64-apple-darwin
-          - os: macos-13
-            target: x86_64-apple-darwin
+            target: universal2-apple-darwin
+          # Windows: x86_64 and ARM64.
           - os: windows-latest
             target: x86_64-pc-windows-msvc
+          - os: windows-11-arm
+            target: aarch64-pc-windows-msvc
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target }}
 
-      - run: cargo build --release --bin xdms-rs --target ${{ matrix.target }}
+      - name: Build
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ matrix.target }}" = universal2-apple-darwin ]; then
+            # Build both arches on this Apple Silicon runner and merge with lipo.
+            rustup target add aarch64-apple-darwin x86_64-apple-darwin
+            cargo build --release --bin xdms-rs --target aarch64-apple-darwin
+            cargo build --release --bin xdms-rs --target x86_64-apple-darwin
+            mkdir -p "target/${{ matrix.target }}/release"
+            lipo -create -output "target/${{ matrix.target }}/release/xdms-rs" \
+              target/aarch64-apple-darwin/release/xdms-rs \
+              target/x86_64-apple-darwin/release/xdms-rs
+            lipo -info "target/${{ matrix.target }}/release/xdms-rs"
+          else
+            rustup target add "${{ matrix.target }}"
+            cargo build --release --bin xdms-rs --target "${{ matrix.target }}"
+          fi
 
       - name: Package
         shell: bash
@@ -55,7 +78,7 @@ jobs:
             echo "ASSET=$staging.tar.gz" >> "$GITHUB_ENV"
           fi
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: xdms-rs-${{ matrix.target }}
           path: ${{ env.ASSET }}
