@@ -65,7 +65,8 @@ impl Decompressor {
     /// Decodes one character/length code (a 12-bit table lookup, falling back to
     /// a tree walk for longer codes).
     fn decode_c(&self, bits: &mut BitReader) -> u16 {
-        let mut node = self.c_table[bits.peek(12) as usize];
+        // `peek(12)` fits the 4096-entry table; mask so the compiler proves it.
+        let mut node = self.c_table[bits.peek(12) as usize & 0xfff];
         if node < N1 {
             bits.consume(u32::from(self.c_len[node as usize]));
         } else {
@@ -92,7 +93,8 @@ impl Decompressor {
     /// bits; the special last code reuses the previous distance (the C
     /// `heavy_lastlen`).
     fn decode_p(&mut self, bits: &mut BitReader, np: u16) -> u16 {
-        let mut node = self.pt_table[bits.peek(8) as usize];
+        // `peek(8)` fits the 256-entry table; mask so the compiler proves it.
+        let mut node = self.pt_table[bits.peek(8) as usize & 0xff];
         if node < np {
             bits.consume(u32::from(self.pt_len[node as usize]));
         } else {

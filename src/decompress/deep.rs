@@ -177,7 +177,9 @@ impl Decompressor {
 
 /// Decodes a match distance from the static tables (the C `DecodePosition`).
 fn decode_deep_distance(bits: &mut BitReader) -> u16 {
-    let prefix = bits.read(8) as usize;
+    // `read(8)` yields a byte, but the compiler can't see that; the mask lets it
+    // prove the D_CODE/D_LEN[prefix] lookups are in bounds and drop the checks.
+    let prefix = bits.read(8) as usize & 0xff;
     let high = u16::from(D_CODE[prefix]) << 8;
     let extra = u32::from(D_LEN[prefix]);
     let low = (((prefix as u32) << extra) | u32::from(bits.read(extra))) & 0xff;

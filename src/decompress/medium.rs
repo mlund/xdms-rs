@@ -21,7 +21,10 @@ impl Decompressor {
                 out[pos] = byte;
                 pos += 1;
             } else {
-                let prefix = bits.read(8) as usize;
+                // `read(8)` yields a byte, but the compiler can't see that; the
+                // mask lets it prove the D_CODE/D_LEN[prefix] lookups are in
+                // bounds and drop the checks.
+                let prefix = bits.read(8) as usize & 0xff;
                 let length = u16::from(D_CODE[prefix]) + 3;
                 let distance = decode_medium_distance(&mut bits, prefix);
                 copy_match(
