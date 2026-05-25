@@ -14,7 +14,8 @@ expect ADF/ADZ instead. The original C decoder is the reference for this port.
 
 ### Command-line tool
 
-Install from the repository using the [Rust toolchain](https://rustup.rs):
+Prebuilt binaries are on the [releases page](https://github.com/mlund/xdms-rs/releases).
+Or install from source using the [Rust toolchain](https://rustup.rs):
 
 ```sh
 cargo install --git https://github.com/mlund/xdms-rs
